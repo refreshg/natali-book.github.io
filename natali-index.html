@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="ka">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Natali • Salon Booking</title>
+    <meta name="description" content="სილამაზის სალონის ონლაინ ჩაწერა — Natali" />
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                50: '#fff1f5',
+                100: '#ffe4ea',
+                200: '#fecdd7',
+                300: '#fda4b8',
+                400: '#fb7185',
+                500: '#f43f5e',
+                600: '#e11d48',
+                700: '#be123c',
+                800: '#9f1239',
+                900: '#881337',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <!-- React 18 UMD + Babel -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="min-h-screen bg-gradient-to-b from-pink-50 to-white text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useMemo, useEffect } = React;
+
+      const SALON = {
+        name: "Beauty Salon Natali",
+        hours: "ყოველ დღე 10:00 - 20:00",
+        address: "ზ. ფალიაშვილის 56, თბილისი",
+        phone: "+995 555 80-00-02",
+        site: "https://www.natali.ge",
+        heroImage: "https://images.unsplash.com/photo-1556228720-1932b6b4f4d2?auto=format&fit=crop&w=1400&q=60"
+      };
+
+      const SERVICES = [
+        { id: "haircut", name: "თმის შეჭრა", duration: 45, price: 50 },
+        { id: "color", name: "თმის შეღებვა", duration: 120, price: 180 },
+        { id: "manicure", name: "მანიკური", duration: 60, price: 70 },
+        { id: "pedicure", name: "პედიკური", duration: 75, price: 90 },
+      ];
+
+      const MASTERS = [
+        { id: "nino", name: "ნინო", roles: ["სტილისტი"], rating: 4.9 },
+        { id: "dato", name: "დათო", roles: ["სტილისტი"], rating: 4.8 },
+        { id: "mariam", name: "მარიამ", roles: ["მანიკური"], rating: 4.9 },
+      ];
+
+      const ROLE_BY_SERVICE = {
+        haircut: "სტილისტი",
+        color: "სტილისტი",
+        manicure: "მანიკური",
+        pedicure: "მანიკური",
+      };
+
+      const TIME_SLOTS = [
+        "10:00","10:30","11:00","11:30","12:00","12:30",
+        "13:00","13:30","14:00","14:30","15:00","15:30",
+        "16:00","16:30","17:00","17:30","18:00","18:30",
+      ];
+
+      // ოსტატის მიუწვდომელი დროები (მაგალითები)
+      const today = new Date().toISOString().split("T")[0];
+      const UNAVAILABLE = {
+        nino: { byDate: { [today]: ["12:00","12:30"] }, byWeekday: { 1: ["10:00"] }, default: ["15:30"] },
+        dato: { byWeekday: { 6: ["17:00","17:30"] } },
+        mariam: {},
+      };
+
+      function getBlockedSlots(masterId, dateISO) {
+        const rule = UNAVAILABLE[masterId];
+        if (!rule) return [];
+        const out = new Set();
+        if (rule.default) rule.default.forEach((t) => out.add(t));
+        const d = new Date(dateISO + "T00:00:00");
+        if (!Number.isNaN(d.getTime()) && rule.byWeekday && rule.byWeekday[d.getDay()]) {
+          rule.byWeekday[d.getDay()].forEach((t) => out.add(t));
+        }
+        if (rule.byDate && rule.byDate[dateISO]) { rule.byDate[dateISO].forEach((t) => out.add(t)); }
+        return Array.from(out).filter((t) => TIME_SLOTS.includes(t)).sort();
+      }
+
+      function Progress({ current, labels }) {
+        return (
+          <div className="flex items-center justify-between gap-2">
+            {labels.map((label, i) => (
+              <div key={label} className="flex-1 flex items-center gap-2">
+                <div className={["shrink-0 h-9 px-3 rounded-2xl grid place-items-center text-xs font-medium", i <= current ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"].join(" ")}>{i+1}</div>
+                <div className={["text-xs", i <= current ? "text-slate-900" : "text-slate-500"].join(" ")}>{label}</div>
+                {i < labels.length - 1 && <div className="flex-1 h-px bg-slate-200"/>}
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      function Card({ children, className="" }) {
+        return <div className={["rounded-3xl border border-slate-200 bg-white", className].join(" ")}>{children}</div>
+      }
+      function CardContent({ children, className="" }) {
+        return <div className={["p-5", className].join(" ")}>{children}</div>
+      }
+      function Button({ children, className="", variant, ...p }) {
+        const base = "inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium transition";
+        const filled = "bg-rose-600 text-white hover:bg-rose-700";
+        const outline = "border border-rose-200 text-rose-700 bg-white hover:bg-rose-50";
+        const cls = [base, variant==="outline" ? outline : filled, className].join(" ");
+        return <button className={cls} {...p}>{children}</button>
+      }
+
+      function SummaryRow({ label, value }) {
+        return (
+          <div className="flex items-start gap-2 text-sm">
+            <div className="w-28 text-slate-500">{label}</div>
+            <div className="flex-1 font-medium text-slate-800">{value}</div>
+          </div>
+        )
+      }
+
+      function PhotoCard({ src, caption, href }) {
+        const [i,setI]=React.useState(0);
+        const fallbacks=[
+          src,
+          "https://images.pexels.com/photos/3993447/pexels-photo-3993447.jpeg?auto=compress&cs=tinysrgb&w=1400",
+          "data:image/svg+xml;utf8,"+encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 900'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop stop-color='#fde2e8' offset='0'/><stop stop-color='#fff' offset='1'/></linearGradient></defs><rect width='1600' height='900' fill='url(#g)'/><g fill='#b4235a' opacity='0.25'><circle cx='200' cy='200' r='120'/><circle cx='1400' cy='250' r='160'/><circle cx='800' cy='750' r='180'/></g></svg>")
+        ];
+        const onError=()=> setI((p)=> Math.min(p+1, fallbacks.length-1));
+        return (
+          <Card className="overflow-hidden shadow-sm">
+            <CardContent className="p-0">
+              <div className="relative group">
+                <img src={fallbacks[i]} onError={onError} alt="Salon" className="w-full aspect-[16/9] md:h-[360px] object-cover"/>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-sm">
+                  <div className="font-medium drop-shadow-sm">{caption}</div>
+                  {href && <a href={href} target="_blank" className="rounded-xl bg-white/90 text-rose-700 border border-rose-200 px-3 py-1 text-xs">ვიზიტი საიტზე</a>}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      }
+
+      function App() {
+        const [step, setStep] = useState(0);
+        const [serviceId, setServiceId] = useState("");
+        const [masterId, setMasterId] = useState("");
+        const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+        const [time, setTime] = useState("");
+        const [name, setName] = useState("");
+        const [phone, setPhone] = useState("");
+        const [comment, setComment] = useState("");
+        const [sent, setSent] = useState(false);
+        const [agree, setAgree] = useState(true);
+
+        const STEP_LABELS = ["სერვისი","ოსტატი","თარიღი/დრო","კონტაქტი","დადასტურება"];
+
+        const service = useMemo(()=> SERVICES.find(s=>s.id===serviceId) || null, [serviceId]);
+        const filteredMasters = useMemo(()=>{
+          if (!service) return MASTERS;
+          const need = ROLE_BY_SERVICE[service.id];
+          return MASTERS.filter(m=> m.roles.includes(need));
+        }, [service]);
+        const master = useMemo(()=> MASTERS.find(m=>m.id===masterId) || null, [masterId]);
+
+        useEffect(()=> {
+          if (masterId && !filteredMasters.some(m=> m.id===masterId)) setMasterId("");
+        }, [serviceId]);
+
+        const blocked = useMemo(()=> getBlockedSlots(masterId, date), [masterId, date]);
+        useEffect(()=> { if (time && blocked.includes(time)) setTime(""); }, [masterId, date]);
+
+        const canNext = useMemo(()=> {
+          if (step===0) return !!serviceId;
+          if (step===1) return !!masterId;
+          if (step===2) return !!date && !!time;
+          if (step===3) return name.trim().length>1 && phone.trim().length>=8 && agree;
+          return true;
+        }, [step, serviceId, masterId, date, time, name, phone, agree]);
+
+        function submit() {
+          setTimeout(()=> setSent(true), 600); // Demo only
+        }
+
+        const siteHost = (()=>{ try { return new URL(SALON.site).host; } catch { return SALON.site; } })();
+
+        return (
+          <div>
+            <section className="bg-gradient-to-r from-pink-100 to-rose-100 border-b border-slate-200">
+              <div className="mx-auto max-w-6xl px-4 py-6 grid md:grid-cols-2 gap-6 items-center">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-full bg-pink-500 text-white grid place-items-center font-bold text-lg shadow-md">N</div>
+                  <div>
+                    <h2 className="text-xl md:text-2xl font-bold leading-tight text-pink-800">{SALON.name}</h2>
+                    <p className="text-slate-700 mt-1">{SALON.hours}</p>
+                    <p className="text-slate-600 text-sm">{SALON.address}</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 text-sm text-slate-700">
+                  <div className="flex items-center gap-2">📞 {SALON.phone}</div>
+                  <div className="flex items-center gap-2">🌐 <a href={SALON.site} target="_blank" className="text-pink-700 font-medium hover:underline">{siteHost}</a></div>
+                  <div className="inline-flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 px-2 py-1 rounded-lg w-max">Demo Mode</div>
+                </div>
+              </div>
+            </section>
+
+            <header className="sticky top-0 z-30 backdrop-blur supports-[backdrop-filter]:bg-white/70 bg-white/60 border-b border-slate-200">
+              <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-items-center font-bold">SB</div>
+                  <div>
+                    <h1 className="text-lg font-semibold leading-tight">Salon Booking</h1>
+                    <p className="text-xs text-slate-500 -mt-0.5">სილამაზის სალონის ონლაინ ჩაწერა</p>
+                  </div>
+                </div>
+                <a href="#book" className="hidden md:inline-flex"><Button className="rounded-2xl px-4">ჩაწერა</Button></a>
+              </div>
+            </header>
+
+            <section className="relative overflow-hidden bg-white">
+              <div className="mx-auto max-w-6xl px-4 py-12 grid md:grid-cols-2 gap-8 items-center">
+                <div>
+                  <h2 className="text-3xl md:text-4xl font-bold leading-tight text-pink-800">აირჩიე სერვისი და დაიწყე</h2>
+                  <p className="mt-3 text-slate-700">აირჩიე პროცედურა, შემდეგ ოსტატი, თარიღი და დრო.</p>
+                  <div className="mt-6 grid sm:grid-cols-2 gap-4">
+                    {SERVICES.map((s)=>(
+                      <button key={s.id}
+                        className={["text-left rounded-2xl border transition p-4 hover:shadow-lg", serviceId===s.id ? "border-pink-600 bg-pink-50" : "border-slate-200 bg-white"].join(" ")}
+                        onClick={()=>{ setServiceId(s.id); setMasterId(""); setStep(1); setTimeout(()=> document.getElementById("book")?.scrollIntoView({behavior:"smooth"}),0); }}>
+                        <div className="font-medium text-slate-900">{s.name}</div>
+                        <div className="mt-1 text-sm text-slate-600">{s.duration} წთ • {s.price} ₾</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold mb-3 text-pink-800">ჩვენი სივრცე</h3>
+                  <PhotoCard src={SALON.heroImage} caption={SALON.address} href={SALON.site}/>
+                </div>
+              </div>
+            </section>
+
+            <section id="book" className="mx-auto max-w-5xl px-4 py-10">
+              <Progress current={step} labels={["სერვისი","ოსტატი","თარიღი/დრო","კონტაქტი","დადასტურება"]} />
+
+              <div className="mt-6">
+                {step===0 && (
+                  <Card>
+                    <CardContent>
+                      <h3 className="text-xl font-semibold mb-3">აირჩიე სერვისი</h3>
+                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {SERVICES.map((s)=>(
+                          <button key={s.id}
+                            className={["text-left rounded-2xl border transition p-4 hover:shadow-sm", serviceId===s.id ? "border-rose-600 bg-rose-50" : "border-slate-200 bg-white"].join(" ")}
+                            onClick={()=> setServiceId(s.id)}>
+                            <div className="font-medium">{s.name}</div>
+                            <div className="mt-2 text-sm text-slate-600">{s.duration} წთ • {s.price} ₾</div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-4 text-right"><Button onClick={()=> setStep(1)} disabled={!serviceId}>შემდეგი</Button></div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {step===1 && (
+                  <Card>
+                    <CardContent>
+                      <h3 className="text-xl font-semibold mb-3">აირჩიე ოსტატი</h3>
+                      {filteredMasters.length>0 ? (
+                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {filteredMasters.map((m)=>(
+                            <button key={m.id}
+                              className={["text-left rounded-2xl border transition p-4 hover:shadow-sm", masterId===m.id ? "border-rose-600 bg-rose-50" : "border-slate-200 bg-white"].join(" ")}
+                              onClick={()=> setMasterId(m.id)}>
+                              <div className="flex items-center justify-between">
+                                <div className="font-medium">{m.name}</div>
+                                <div className="text-xs text-slate-500">★ {m.rating}</div>
+                              </div>
+                              <div className="mt-1 text-sm text-slate-600">{m.roles.join(", ")}</div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : <div className="text-sm text-slate-600">ამ სერვისზე ოსტატი დროებით მიუწვდომელია.</div>}
+                      <div className="mt-4 flex items-center justify-between">
+                        <Button variant="outline" onClick={()=> setStep(0)}>უკან</Button>
+                        <Button onClick={()=> setStep(2)} disabled={!masterId}>შემდეგი</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {step===2 && (
+                  <Card>
+                    <CardContent>
+                      <h3 className="text-xl font-semibold mb-3">თარიღი და დრო</h3>
+                      <div className="grid md:grid-cols-3 gap-4">
+                        <div className="md:col-span-1">
+                          <label className="text-sm text-slate-600">თარიღი</label>
+                          <input type="date" min={new Date().toISOString().split("T")[0]} value={date} onChange={(e)=> setDate(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-600" />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="text-sm text-slate-600">ხელმისაწვდომი დრო</label>
+                          <div className="mt-2 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                            {TIME_SLOTS.map((t)=> {
+                              const disabled = getBlockedSlots(masterId, date).includes(t);
+                              const base="rounded-xl border px-3 py-2 text-sm";
+                              const active="border-rose-600 bg-rose-50";
+                              const idle="border-slate-200 bg-white hover:shadow-sm";
+                              const off="border-slate-200 bg-slate-100 opacity-50 cursor-not-allowed line-through";
+                              return (
+                                <button key={t} disabled={disabled} title={disabled ? "მიუწვდომელია არჩეული ოსტატისთვის" : undefined}
+                                  onClick={()=> !disabled && setTime(t)}
+                                  className={[base, time===t ? active : disabled ? off : idle].join(" ")}>{t}</button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between">
+                        <Button variant="outline" onClick={()=> setStep(1)}>უკან</Button>
+                        <Button onClick={()=> setStep(3)} disabled={!date || !time}>შემდეგი</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {step===3 && (
+                  <Card>
+                    <CardContent>
+                      <h3 className="text-xl font-semibold mb-3">საკონტაქტო ინფორმაცია</h3>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm text-slate-600">სახელი</label>
+                          <input type="text" value={name} onChange={(e)=> setName(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-600" placeholder="თქვენი სახელი"/>
+                        </div>
+                        <div>
+                          <label className="text-sm text-slate-600">ტელეფონი</label>
+                          <input type="tel" value={phone} onChange={(e)=> setPhone(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-600" placeholder="558 123 456"/>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="text-sm text-slate-600">შენიშვნა (არაა აუცილებელი)</label>
+                          <textarea rows="3" value={comment} onChange={(e)=> setComment(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-600" placeholder="მაგ: სპეციალური თხოვნა"/>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm md:col-span-2">
+                          <input type="checkbox" checked={agree} onChange={(e)=> setAgree(e.target.checked)} className="rounded"/> ვეთანხმები პერსონალური მონაცემების დამუშავებას
+                        </label>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between">
+                        <Button variant="outline" onClick={()=> setStep(2)}>უკან</Button>
+                        <Button onClick={()=> setStep(4)} disabled={!(name && phone.trim().length>=8 && agree)}>შემდეგი</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {step===4 && (
+                  <Card>
+                    <CardContent>
+                      <h3 className="text-xl font-semibold mb-3">დადასტურება</h3>
+                      {!sent ? (
+                        <div className="space-y-3 text-slate-700">
+                          <SummaryRow label="სერვისი" value={`${service?.name || "-"} · ${service?.duration || "?"}წთ · ${service?.price || "?"} ₾`}/>
+                          <SummaryRow label="ოსტატი" value={master?.name || "არაფიქსირებული"}/>
+                          <SummaryRow label="როდის" value={`${date || "-"} ${time || ""}`}/>
+                          <SummaryRow label="კლიენტი" value={`${name || "-"} • ${phone || "-"}`}/>
+                          {comment && <SummaryRow label="შენიშვნა" value={comment}/>}
+                          <div className="pt-2"><Button onClick={()=> setTimeout(()=> setSent(true), 600)}>დაჯავშნა</Button></div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8">
+                          <div className="mx-auto h-12 w-12 rounded-full bg-green-100 grid place-items-center text-green-700 text-xl">✓</div>
+                          <h4 className="mt-4 text-xl font-semibold">წარმატებით გაიგზავნა!</h4>
+                          <p className="text-slate-600 mt-1">ჩვენი ოპერატორი დაგიკავშირდებათ დასადასტურებლად. მადლობა!</p>
+                        </div>
+                      )}
+                      <div className="mt-4">
+                        <Button variant="outline" onClick={()=> setStep(3)}>უკან</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </section>
+
+            <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-500">© {new Date().getFullYear()} {SALON.name}</footer>
+          </div>
+        )
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App/>);
+    </script>
+  </body>
+</html>
